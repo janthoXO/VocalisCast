@@ -51,6 +51,7 @@ build-backend = "hatchling.build"
 
 [tool.ruff]
 line-length = 100
+extend-exclude = ["*.md"]  # ruff reformats python blocks inside markdown, leave the docs alone
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

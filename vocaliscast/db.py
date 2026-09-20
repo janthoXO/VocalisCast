@@ -7,7 +7,7 @@ queries: `sqlite:///path/vocab.db` or `postgresql+psycopg://user:pw@host/db`.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import (
     Column,
@@ -131,9 +131,7 @@ class Store:
     def update_episode(self, episode_id: int, topic: str, directory: str) -> None:
         """Set once the topic is known (it may come from the model) and the folder exists."""
         stmt = (
-            episodes.update()
-            .where(episodes.c.id == episode_id)
-            .values(topic=topic, dir=directory)
+            episodes.update().where(episodes.c.id == episode_id).values(topic=topic, dir=directory)
         )
         with self.engine.begin() as conn:
             conn.execute(stmt)
@@ -181,5 +179,5 @@ class Store:
             conn.execute(
                 episodes.update()
                 .where(episodes.c.id == episode_id)
-                .values(rendered_at=datetime.now(timezone.utc))
+                .values(rendered_at=datetime.now(UTC))
             )

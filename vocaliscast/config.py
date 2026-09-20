@@ -6,12 +6,15 @@ language-dependent value is looked up from the configured ISO code.
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
 
 from babel import Locale, UnknownLocaleError
 from dotenv import load_dotenv
+
+CHARS_PER_PLACEMENT = 60  # rough room one vocabulary use needs in the script
 
 
 class ConfigError(Exception):
@@ -29,8 +32,22 @@ def _int(name: str, default: int, low: int | None = None, high: int | None = Non
     return value
 
 
+def _json(name: str) -> dict:
+    """Provider-specific knobs as one JSON object, e.g. {"num_ctx": 32768}."""
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ConfigError(f"{name} must be a JSON object, got {raw!r}") from exc
+    if not isinstance(value, dict):
+        raise ConfigError(f"{name} must be a JSON object, got {raw!r}")
+    return value
+
+
 def _language_name(code: str, display_in: str) -> str:
-    """"de" -> "German", named in the language of `display_in`."""
+    """ "de" -> "German", named in the language of `display_in`."""
     try:
         name = Locale.parse(code).get_display_name(display_in)
     except (UnknownLocaleError, ValueError, TypeError) as exc:
@@ -50,6 +67,7 @@ class Config:
     llm_base_url: str | None
     llm_api_key: str | None
     llm_temperature: float
+    llm_options: dict
     tts_provider: str
     tts_model: str | None
     tts_base_url: str | None
@@ -112,6 +130,7 @@ def load() -> Config:
         llm_base_url=os.getenv("VC_LLM_BASE_URL") or None,
         llm_api_key=os.getenv("VC_LLM_API_KEY") or None,
         llm_temperature=float(os.getenv("VC_LLM_TEMPERATURE", "0.8")),
+        llm_options=_json("VC_LLM_OPTIONS"),
         tts_provider=os.getenv("VC_TTS_PROVIDER", "chatterbox"),
         tts_model=os.getenv("VC_TTS_MODEL") or None,
         tts_base_url=os.getenv("VC_TTS_BASE_URL") or None,
@@ -132,6 +151,17 @@ def load() -> Config:
     if cfg.native_lang == cfg.target_lang:
         raise ConfigError("VC_NATIVE_LANG and VC_TARGET_LANG are the same language")
     _ = cfg.native_language, cfg.target_language  # resolve now, not mid-episode
+
+    # Every use needs a sentence around it. Ask for more uses than the episode has
+    # room for and the writer cannot win, so say so now instead of after three tries.
+    placements = cfg.new_words * (cfg.new_min_uses + 1) + cfg.review_words * 2
+    if cfg.target_chars < placements * CHARS_PER_PLACEMENT:
+        raise ConfigError(
+            f"a {cfg.episode_minutes} minute episode is too short for {cfg.new_words} new items "
+            f"used {cfg.new_min_uses + 1} times each. Raise VC_EPISODE_MINUTES to about "
+            f"{-(-placements * CHARS_PER_PLACEMENT // cfg.chars_per_minute)}, or lower "
+            "VC_NEW_WORDS / VC_NEW_MIN_USES."
+        )
     cfg.data_dir.mkdir(parents=True, exist_ok=True)
     cfg.episodes_dir.mkdir(exist_ok=True)
     return cfg

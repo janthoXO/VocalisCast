@@ -24,7 +24,7 @@ from langgraph.types import RetryPolicy
 from . import prompts
 from .config import Config
 from .db import Store, Word
-from .models import Plan, Script, Topic
+from .models import Script, Segment, Topic, plan_model
 
 MAX_ATTEMPTS = 3
 LENGTH_TOLERANCE = 0.25
@@ -59,6 +59,11 @@ def build_llm(cfg: Config):
         kwargs["base_url"] = cfg.llm_base_url
     if cfg.llm_api_key:
         kwargs["api_key"] = cfg.llm_api_key
+    if cfg.llm_provider == "ollama":
+        # Ollama defaults to a 4k context. A reasoning model fills it with thinking
+        # tokens and returns an empty answer, so give it room and turn thinking off.
+        kwargs |= {"num_ctx": 16384, "reasoning": False}
+    kwargs |= cfg.llm_options  # VC_LLM_OPTIONS: whatever this provider calls things
     return init_chat_model(**kwargs)
 
 
@@ -66,6 +71,48 @@ def slug(text: str, words: int = 6) -> str:
     """Folder-safe name. Keeps letters of any script, drops punctuation."""
     cleaned = re.sub(r"[^\w\s-]", "", text, flags=re.UNICODE).strip().casefold()
     return "-".join(cleaned.split()[:words]) or "episode"
+
+
+def split_segments(script: Script, plan: dict) -> Script:
+    """Cut planned terms out of native-language segments into segments of their own.
+
+    Small models get the content right and the shape wrong: they write the target
+    word inline in a native segment and leave `vocab` empty. The word then never
+    gets spoken in the target language and never counts. Fixing the shape here is
+    cheaper than another round trip, and it costs nothing when the model got it right.
+    """
+    terms = sorted({i["term"] for i in plan["new"] + plan["review"]}, key=len, reverse=True)
+    if not terms:
+        return script
+    # ponytail: exact matches only. Inflected forms stay unsplit and the writer is
+    # told to tag those itself; a lemmatizer per language is the upgrade path.
+    pattern = re.compile(
+        "|".join(rf"(?<!\w){re.escape(t)}(?!\w)" for t in terms), re.IGNORECASE | re.UNICODE
+    )
+    by_key = {t.casefold(): t for t in terms}
+
+    for line in script.lines:
+        rebuilt: list[Segment] = []
+        for segment in line.segments:
+            if segment.vocab or not pattern.search(segment.text):
+                rebuilt.append(segment)
+                continue
+            position, first = 0, True
+            for match in pattern.finditer(segment.text):
+                if match.start() > position:
+                    rebuilt.append(Segment(text=segment.text[position : match.start()]))
+                rebuilt.append(
+                    Segment(
+                        text=match.group(),
+                        vocab=by_key[match.group().casefold()],
+                        intro=segment.intro and first,
+                    )
+                )
+                position, first = match.end(), False
+            if position < len(segment.text):
+                rebuilt.append(Segment(text=segment.text[position:]))
+        line.segments = rebuilt
+    return script
 
 
 def validate_script(script: Script, plan: dict, min_uses: int, target_chars: int) -> list[str]:
@@ -130,7 +177,7 @@ def transcript(script: Script, title: str) -> str:
 def build_graph(cfg: Config, store: Store, checkpointer=None, stop_before_render: bool = False):
     llm = build_llm(cfg)
     topic_picker = llm.with_structured_output(Topic)
-    planner = llm.with_structured_output(Plan)
+    planner = llm.with_structured_output(plan_model(cfg.native_language, cfg.target_language))
     writer = llm.with_structured_output(Script)
 
     def pick_topic(state: EpisodeState) -> dict:
@@ -225,10 +272,12 @@ def build_graph(cfg: Config, store: Store, checkpointer=None, stop_before_render
         if state.get("errors"):
             messages += [
                 HumanMessage(json.dumps(state["script"], ensure_ascii=False)),
-                HumanMessage(prompts.RETRY.format(errors="\n".join(f"- {e}" for e in state["errors"]))),
+                HumanMessage(
+                    prompts.RETRY.format(errors="\n".join(f"- {e}" for e in state["errors"]))
+                ),
             ]
 
-        script = writer.invoke(messages)
+        script = split_segments(writer.invoke(messages), plan)
         path = Path(state["episode_dir"]) / "script.json"
         path.write_text(
             json.dumps(
@@ -251,9 +300,7 @@ def build_graph(cfg: Config, store: Store, checkpointer=None, stop_before_render
 
         script = Script(**state["script"])
         directory = Path(state["episode_dir"])
-        (directory / "transcript.md").write_text(
-            transcript(script, script.title), encoding="utf-8"
-        )
+        (directory / "transcript.md").write_text(transcript(script, script.title), encoding="utf-8")
         audio = render_episode(script, cfg, directory / "episode.mp3")
         return {"audio_path": str(audio)}
 
