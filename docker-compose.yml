@@ -1,0 +1,33 @@
+# LLM: docker compose up -d && docker compose exec ollama ollama pull qwen3:14b
+# + Postgres store: docker compose --profile db up -d
+# Apple Silicon: containers get no GPU, run `ollama serve` natively instead.
+services:
+  ollama:
+    image: ollama/ollama:latest
+    ports: ["11434:11434"]
+    volumes: ["ollama:/root/.ollama"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  db:
+    profiles: ["db"]
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: vocaliscast
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vocaliscast}
+      POSTGRES_DB: vocaliscast
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vocaliscast"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  ollama:
+  pgdata:
