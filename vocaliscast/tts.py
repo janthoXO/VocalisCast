@@ -43,7 +43,9 @@ def _read_wav(data: bytes) -> tuple[np.ndarray, int]:
 
 def _post(url: str, payload: dict, headers: dict) -> bytes:
     request = urllib.request.Request(
-        url, data=json.dumps(payload).encode(), headers={"Content-Type": "application/json", **headers}
+        url,
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json", **headers},
     )
     with urllib.request.urlopen(request, timeout=300) as response:
         return response.read()
@@ -151,7 +153,17 @@ def _write_audio(audio: np.ndarray, rate: int, out_path: Path) -> Path:
 
     if out_path.suffix == ".mp3" and shutil.which("ffmpeg"):
         subprocess.run(
-            ["ffmpeg", "-y", "-loglevel", "error", "-i", str(wav_path), "-b:a", "128k", str(out_path)],
+            [
+                "ffmpeg",
+                "-y",
+                "-loglevel",
+                "error",
+                "-i",
+                str(wav_path),
+                "-b:a",
+                "128k",
+                str(out_path),
+            ],
             check=True,
         )
         wav_path.unlink()
