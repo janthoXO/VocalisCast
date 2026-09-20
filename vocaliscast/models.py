@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model
 
 
 class Topic(BaseModel):
@@ -13,22 +13,41 @@ class Topic(BaseModel):
     topic: str = Field(description="One sentence naming a story, fact or question worth an episode")
 
 
-class VocabItem(BaseModel):
-    term: str = Field(description="The item in the citation form a learner's dictionary would use")
-    translation: str = Field(description="Its meaning in the listener's native language")
-    kind: Literal["word", "phrase", "idiom", "basic"] = Field(
-        description="'basic' for high-frequency general vocabulary such as pronouns, "
-        "common verbs or connectors"
+def plan_model(native_language: str, target_language: str) -> type[BaseModel]:
+    """The plan schema, with the real language names written into the field
+    descriptions. The model sees those in the JSON schema, and without them it
+    happily proposes words in the wrong language."""
+    item = create_model(
+        "VocabItem",
+        term=(
+            str,
+            Field(
+                description=f"The item written in {target_language}, in the citation form a "
+                f"{target_language} dictionary would list"
+            ),
+        ),
+        translation=(str, Field(description=f"What it means, written in {native_language}")),
+        kind=(
+            Literal["word", "phrase", "idiom", "basic"],
+            Field(
+                description="'basic' for high-frequency general vocabulary such as pronouns, "
+                "common verbs or connectors"
+            ),
+        ),
     )
-
-
-class Plan(BaseModel):
-    """The fixed vocabulary of one episode."""
-
-    new_items: list[VocabItem] = Field(description="Items the listener has never heard")
-    review_terms: list[str] = Field(
-        default_factory=list,
-        description="Terms copied verbatim from the review candidates, to use again",
+    return create_model(
+        "Plan",
+        new_items=(
+            list[item],
+            Field(description=f"Items in {target_language} the listener has never heard"),
+        ),
+        review_terms=(
+            list[str],
+            Field(
+                default_factory=list,
+                description="Terms copied verbatim from the review candidates, to use again",
+            ),
+        ),
     )
 
 
@@ -60,7 +79,10 @@ class Script(BaseModel):
 
     def uses(self, term: str) -> int:
         return sum(
-            1 for line in self.lines for s in line.segments if s.vocab and s.vocab.casefold() == term.casefold()
+            1
+            for line in self.lines
+            for s in line.segments
+            if s.vocab and s.vocab.casefold() == term.casefold()
         )
 
     def intros(self, term: str) -> int:

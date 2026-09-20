@@ -15,6 +15,8 @@ PLAN_SYSTEM = """You plan the vocabulary for a podcast episode in {native_langua
 The episode is a real podcast, not a lesson. The vocabulary is seasoning.
 
 Rules for the {n_new} new items:
+- Every term is written in {target_language}. Every translation is written in {native_language}. \
+A term written in {native_language} is the one mistake you must not make.
 - They do NOT need to relate to the topic, or to each other.
 - At most {n_topical} may come from the topic. The rest must be high-frequency general \
 vocabulary: pronouns, everyday verbs, connectors, discourse words, common idioms. Those are the \
@@ -49,6 +51,14 @@ is a form of, character for character, even when the text in the segment is infl
 conjugated. Counting depends on this.
 - Use NO {target_language} anywhere else. Every {target_language} word belongs to a planned item.
 
+One line looks like this, where the middle segment is the only {target_language} in it:
+
+  {{"speaker": "A", "segments": [
+    {{"text": "<{native_language} speech, ending mid-sentence> "}},
+    {{"text": "<the planned item, inflected to fit the sentence>", "vocab": "<the planned item, \
+exactly as listed>", "intro": true}},
+    {{"text": " <the {native_language} sentence continues>"}}]}}
+
 NEW items:
 - Each is explained exactly once, at its first appearance, in the segment marked "intro": true. \
 One or two sentences in {native_language}, spoken like a host aside, not like a dictionary.
@@ -70,7 +80,10 @@ NEW ITEMS (each needs one intro and at least {min_uses} further uses):
 {new_items}
 
 REVIEW ITEMS (1-3 uses each, no explanation):
-{review_items}"""
+{review_items}
+
+Before you answer, count: every new item needs one segment with "intro": true plus {min_uses} \
+further segments, each carrying its "vocab" key. A wonderful episode that skips this is a failure."""
 
 RETRY = """Your previous script did not meet the rules:
 
