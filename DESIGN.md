@@ -181,7 +181,8 @@ class EpisodeState(TypedDict):
 |---|---|---|
 | `pick_topic` | Asks the LLM for an interesting story or fact | Only runs when no topic was given |
 | `plan_vocab` | Reads due review candidates from the store, asks the LLM for `VC_NEW_WORDS` new items plus a review selection (§8.4) | Structured output |
-| `write_script` | Writes the two-host dialogue as JSON. On a retry, the previous script and the validator's errors are appended to the prompt | `RetryPolicy(max_attempts=3)` for transport and parse failures |
+| `write_script` | Writes the two-host dialogue as JSON, then runs `split_segments` over it | `RetryPolicy(max_attempts=3)` for transport and parse failures |
+| `split_segments` (in `write_script`) | Cuts planned terms out of native-language segments into their own segments. Small models write the word inline and leave `vocab` empty, which is right content in the wrong shape | Deterministic, no round trip. Exact matches only |
 | `validate` | Deterministic checks, fills `errors` | Pure function, unit tested |
 | `render` | `speak()` per line, joins audio, writes `episode.mp3` and `transcript.md` | The expensive node |
 | `commit` | Writes new items and bumps feature counts | Runs only after a successful render |
@@ -356,6 +357,7 @@ Everything comes from the environment and is validated at startup: unknown langu
 | `VC_LLM_BASE_URL` | *(unset)* | For self-hosted or OpenAI-compatible endpoints |
 | `VC_LLM_API_KEY` | *(unset)* | Hosted providers |
 | `VC_LLM_TEMPERATURE` | `0.8` | |
+| `VC_LLM_OPTIONS` | *(unset)* | JSON merged into the provider's arguments, e.g. `{"num_ctx": 32768}` |
 | `VC_TTS_PROVIDER` | `chatterbox` | `chatterbox`, `openai`, `elevenlabs` |
 | `VC_TTS_MODEL` | *(provider default)* | Checkpoint path or hosted model name |
 | `VC_TTS_BASE_URL` | *(unset)* | For self-hosted speech endpoints |
@@ -447,7 +449,9 @@ The LLM and TTS are judged by listening. Mocking them would only test the mocks.
 |---|---|---|
 | Very short TTS inputs (a single word) glitch in the local engine | The taught item sounds bad, which defeats the purpose | **Spike this first (M0).** If it glitches: synthesize the word inside a carrier phrase and trim it, or use a provider that handles the whole line |
 | Hosted TTS auto-detects the language of a short foreign span wrongly | Native accent on the target item | Prefer `chatterbox` for exact control; keep hosted providers as the convenient option |
-| A small local model ignores the usage counts or the "topic first" rule | Vocabulary-list episodes | Validator plus retry. If it persists: outline first, then section by section with a per-section quota |
+| A small local model ignores the usage counts or the "topic first" rule | Vocabulary-list episodes | **Measured:** a 9B model reached 3 of 5 items and sometimes ignored the vocabulary entirely on a late attempt. Validator plus retry catches it; 14B and up is the recommendation. If it persists: outline first, then section by section with a per-section quota |
+| Thinking models fill a small context window with reasoning and return nothing | Empty structured output, unusable | **Measured on Ollama:** defaults raised to `num_ctx=16384` and `reasoning=False`; other providers via `VC_LLM_OPTIONS` |
+| Too much vocabulary for the episode length | The writer cannot win, three attempts wasted | Config refuses it at startup: roughly 60 characters of speech are needed per required use |
 | Structured output differs between providers | Parse failures on some backends | `with_structured_output` plus a node retry; a provider that cannot do it is not supported |
 | Non-topical items forced in clumsily | Awkward episodes | This is a prompt-quality problem — listen to M1 output before building further |
 | LangGraph and LangChain version churn | Breakage on upgrade | Pin both in `pyproject.toml`; the graph uses only the stable core API |
